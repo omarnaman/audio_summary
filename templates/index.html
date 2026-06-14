@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Audio Summarizer</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar: History / Old Conversions -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🎙️</span>
+                    <h2>Summaries</h2>
+                </div>
+            </div>
+            
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Search conversions...">
+            </div>
+
+            <div class="history-list" id="history-list">
+                <!-- Loaded dynamically -->
+                <div class="loading-state">Loading history...</div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="workspace">
+            <!-- Top bar -->
+            <header class="top-bar">
+                <div class="header-info">
+                    <h1>Audio Summarizer</h1>
+                    <p>Powered by Google Gemini 3.5 Flash</p>
+                </div>
+                <div class="actions">
+                    <button id="new-btn" class="btn btn-primary">
+                        <span class="btn-icon">＋</span> New Summary
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="content-container">
+                <!-- Upload View -->
+                <section class="view-panel" id="upload-panel">
+                    <div class="glass-card upload-card">
+                        <div class="card-header">
+                            <h3>Upload Audio File</h3>
+                            <p>Upload a news broadcast, podcast, or meeting recording to transcribe and summarize.</p>
+                        </div>
+                        
+                        <form id="upload-form" class="upload-form">
+                            <div class="drag-zone" id="drag-zone">
+                                <input type="file" id="audio-input" accept="audio/*" class="file-input">
+                                <div class="drag-zone-content">
+                                    <span class="upload-large-icon">📤</span>
+                                    <p class="drag-text">Drag and drop your audio file here or <span class="browse-link">browse files</span></p>
+                                    <p class="file-types-info">Supports MP3, WAV, M4A, AAC, etc.</p>
+                                </div>
+                                <div class="file-selected-content hidden" id="file-selected-content">
+                                    <span class="audio-file-icon">🎵</span>
+                                    <p class="selected-file-name" id="selected-file-name"></p>
+                                    <button type="button" id="remove-file-btn" class="btn-remove">Remove file</button>
+                                </div>
+                            </div>
+
+                            <div class="form-settings">
+                                <div class="setting-item">
+                                    <label for="model-select">AI Model</label>
+                                    <select id="model-select" name="model" class="select-input">
+                                        <option value="gemini-3.5-flash" selected>Gemini 3.5 Flash (Medium) - Default</option>
+                                        <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                                        <option value="gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Experimental)</option>
+                                    </select>
+                                </div>
+                                <div class="setting-item">
+                                    <div class="checkbox-wrapper">
+                                        <input type="checkbox" id="force-rerun" name="force_rerun" class="checkbox-input">
+                                        <label for="force-rerun">Force re-run if exists in cache</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" id="submit-btn" class="btn btn-submit btn-block" disabled>
+                                Start Summary Generation
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Processing State overlay/card -->
+                    <div class="glass-card processing-card hidden" id="processing-card">
+                        <div class="spinner"></div>
+                        <h3 id="processing-status">Uploading to Gemini...</h3>
+                        <p>This may take up to a minute depending on the file size.</p>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="progress-bar"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Summary Reader View -->
+                <section class="view-panel hidden" id="reader-panel">
+                    <div class="reader-grid">
+                        <!-- Left Panel: Summary Details -->
+                        <div class="glass-card main-summary-card">
+                            <div class="reader-header">
+                                <div class="metadata-tags">
+                                    <span class="tag date-tag" id="summary-date">2026-06-08</span>
+                                    <span id="reused-badge" class="tag cache-badge hidden">✓ Reused from Cache</span>
+                                </div>
+                                <h2 id="summary-title">Summary Title</h2>
+                            </div>
+                            
+                            <div class="markdown-body" id="summary-body">
+                                <!-- Summary markdown content rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Statistics & Actions -->
+                        <div class="reader-sidebar-cards">
+                            <div class="glass-card stats-card">
+                                <h3>API Usage & Performance</h3>
+                                <div class="stat-list">
+                                    <div class="stat-item">
+                                        <span class="stat-label">Conversion Time</span>
+                                        <span class="stat-val" id="stat-time">0.00s</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-label">Prompt Tokens</span>
+                                        <span class="stat-val" id="stat-prompt-tokens">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-label">Output Tokens</span>
+                                        <span class="stat-val" id="stat-output-tokens">0</span>
+                                    </div>
+                                    <div class="stat-divider"></div>
+                                    <div class="stat-item total-stat">
+                                        <span class="stat-label">Total Tokens</span>
+                                        <span class="stat-val" id="stat-total-tokens">0</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="glass-card actions-card">
+                                <h3>Actions</h3>
+                                <div class="action-buttons">
+                                    <button id="download-md-btn" class="btn btn-secondary btn-block">
+                                        📥 Download Markdown
+                                    </button>
+                                    <button id="copy-btn" class="btn btn-secondary btn-block">
+                                        📋 Copy Markdown
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden">Notification message</div>
+
+    <!-- JS -->
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
