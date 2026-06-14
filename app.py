@@ -223,6 +223,7 @@ def convert_audio():
         output_path = os.path.join(day_dir, output_filename)
 
         with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"# {clean_title_text}\n\n")
             f.write(summary_text)
 
         # Update database
