@@ -38,84 +38,6 @@ def save_db(db):
     except Exception as e:
         print(f"Error saving database: {e}")
 
-def sync_existing_conversions():
-    db = load_db()
-    if not os.path.exists(CONVERSIONS_DIR):
-        return
-        
-    for date_dir in os.listdir(CONVERSIONS_DIR):
-        date_path = os.path.join(CONVERSIONS_DIR, date_dir)
-        if not os.path.isdir(date_path):
-            continue
-            
-        # Validate date format (YYYY-MM-DD)
-        if not re.match(r'^\d{4}-\d{2}-\d{2}$', date_dir):
-            continue
-            
-        for file in os.listdir(date_path):
-            if not file.endswith(".md"):
-                continue
-                
-            file_path = os.path.join(date_path, file)
-            filename_base = file[:-3]
-            
-            # Create a unique key for the db if it doesn't exist
-            path_key = f"{date_dir}/{filename_base}"
-            db_key = hashlib.sha256(path_key.encode('utf-8')).hexdigest()
-            
-            if db_key in db:
-                continue
-                
-            # Parse the file to get title and stats
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    
-                # Title parsing
-                lines = content.strip().split('\n')
-                title = "Detailed Summary"
-                for line in lines:
-                    if line.strip():
-                        title = re.sub(r'^[#*\s]+', '', line).strip()
-                        break
-                        
-                # Stats parsing
-                stats = {
-                    "conversion_time": 0.0,
-                    "prompt_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0
-                }
-                
-                time_match = re.search(r'\*\*Conversion Time\*\*:\s*([\d\.]+)', content)
-                prompt_match = re.search(r'\*\*Prompt Tokens\*\*:\s*([\d,]+)', content)
-                output_match = re.search(r'\*\*Output Tokens\*\*:\s*([\d,]+)', content)
-                total_match = re.search(r'\*\*Total Tokens\*\*:\s*([\d,]+)', content)
-                
-                if time_match:
-                    stats["conversion_time"] = float(time_match.group(1))
-                if prompt_match:
-                    stats["prompt_tokens"] = int(prompt_match.group(1).replace(",", ""))
-                if output_match:
-                    stats["output_tokens"] = int(output_match.group(1).replace(",", ""))
-                if total_match:
-                    stats["total_tokens"] = int(total_match.group(1).replace(",", ""))
-                    
-                # Add to DB
-                db[db_key] = {
-                    "hash": db_key,
-                    "original_filename": f"{filename_base}.mp3",
-                    "filename_base": filename_base,
-                    "title": title,
-                    "date": date_dir,
-                    "timestamp": datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat(),
-                    "stats": stats
-                }
-                print(f"Synced existing conversion: {path_key}")
-            except Exception as e:
-                print(f"Failed to sync file {file_path}: {e}")
-                
-    save_db(db)
 
 
 def calculate_sha256(filepath):
@@ -344,7 +266,5 @@ def convert_audio():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    print("Syncing existing conversions...")
-    sync_existing_conversions()
     app.run(host="0.0.0.0", port=5000, debug=True)
 
