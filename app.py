@@ -277,15 +277,20 @@ def convert_audio():
         summary_text += stats_markdown
 
         # Parse title
-        lines = summary_text.strip().split('\n')
-        title_line = "Detailed Summary"
-        for line in lines:
-            if line.strip():
-                title_line = line.strip()
-                break
+        user_title = request.form.get("title", "").strip()
+
+        if user_title:
+            clean_title_text = user_title
+        else:
+            lines = summary_text.strip().split('\n')
+            title_line = "Detailed Summary"
+            for line in lines:
+                if line.strip():
+                    title_line = line.strip()
+                    break
+            clean_title_text = re.sub(r'^[#*\s]+', '', title_line).strip()
 
         # Remove markdown heading symbols from title
-        clean_title_text = re.sub(r'^[#*\s]+', '', title_line).strip()
         filename_base = clean_filename(clean_title_text)
 
         day_str = datetime.now().strftime("%Y-%m-%d")

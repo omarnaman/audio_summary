@@ -229,6 +229,11 @@ document.addEventListener("DOMContentLoaded", () => {
         formData.append("audio", file);
         formData.append("model", modelSelect.value);
 
+        const userTitle = document.getElementById("title-input").value.trim();
+        if (userTitle) {
+            formData.append("title", userTitle);
+        }
+
         const forceRerunCheckbox = document.getElementById("force-rerun");
         if (forceRerunCheckbox.checked) {
             formData.append("force_rerun", "true");
