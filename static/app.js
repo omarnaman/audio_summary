@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
     const copyBtn = document.getElementById("copy-btn");
     const downloadMdBtn = document.getElementById("download-md-btn");
+    const deleteBtn = document.getElementById("delete-btn");
     const toast = document.getElementById("toast");
 
     let historyData = [];
@@ -105,7 +106,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         try {
-            const response = await fetch(`/api/conversions/${item.date}/${item.filename_base}.md`);
+            const response = await fetch(`/api/conversions/${item.hash}`);
             if (!response.ok) throw new Error("Failed to fetch summary file");
             
             const data = await response.json();
@@ -301,6 +302,32 @@ document.addEventListener("DOMContentLoaded", () => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         showToast("Summary download started!");
+    });
+
+    // Delete a conversation
+    deleteBtn.addEventListener("click", async () => {
+        if (!currentSummary) return;
+
+        if (confirm("Are you sure you want to delete this conversion? This action cannot be undone.")) {
+            try {
+                const response = await fetch(`/api/conversions/${currentSummary.hash}`, {
+                    method: "DELETE",
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || "Failed to delete conversion");
+                }
+
+                showToast("Conversion deleted successfully!");
+                await loadHistory();
+                newSummaryBtn.click(); // Return to main screen
+
+            } catch (error) {
+                console.error(error);
+                showToast(`Error: ${error.message}`);
+            }
+        }
     });
 
     // Initial load

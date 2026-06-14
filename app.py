@@ -66,22 +66,44 @@ def get_conversions():
     conversions_list.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return jsonify(conversions_list)
 
-@app.route("/api/conversions/<date>/<filename>", methods=["GET"])
-def get_conversion_content(date, filename):
-    # Safe path traversal prevention
-    safe_date = os.path.basename(date)
-    safe_filename = os.path.basename(filename)
-    filepath = os.path.join(CONVERSIONS_DIR, safe_date, safe_filename)
+@app.route("/api/conversions/<file_hash>", methods=["DELETE"])
+def delete_conversion(file_hash):
+    db = load_db()
+    conversion = db.get(file_hash)
+    if not conversion:
+        return jsonify({"error": "Conversion not found"}), 404
     
-    if not os.path.exists(filepath):
-        return jsonify({"error": "File not found"}), 404
-        
+    # Delete markdown file
+    md_path = os.path.join(CONVERSIONS_DIR, conversion["date"], f"{conversion['filename_base']}.md")
+    if os.path.exists(md_path):
+        os.remove(md_path)
+    
+    # Optionally, delete Gemini file (not implemented here to avoid accidental data loss)
+    
+    # Remove from database
+    del db[file_hash]
+    save_db(db)
+    
+    return jsonify({"message": "Conversion deleted successfully"})
+    
+
+@app.route("/api/conversions/<file_hash>", methods=["GET"])
+def get_conversion_content(file_hash):
+    db = load_db()
+    conversion = db.get(file_hash)
+    if not conversion:
+        return jsonify({"error": "Conversion not found"}), 404
+
+    md_path = os.path.join(CONVERSIONS_DIR, conversion["date"], f"{conversion['filename_base']}.md")
+    if not os.path.exists(md_path):
+        return jsonify({"error": "Summary file not found"}), 404
+    
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(md_path, "r", encoding="utf-8") as f:
             content = f.read()
         return jsonify({"content": content})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to read summary file: {str(e)}"}), 500
 
 @app.route("/api/convert", methods=["POST"])
 def convert_audio():
