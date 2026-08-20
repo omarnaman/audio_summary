@@ -22,7 +22,7 @@ def delete_by_hash(session: Session, file_hash: str) -> bool:
     return True
 
 
-def upsert(
+def save_transcript(
     session: Session,
     *,
     hash: str,
@@ -30,18 +30,12 @@ def upsert(
     title: str,
     filename_base: str,
     transcript_text: str,
-    summary_text: str,
     whisper_model: str | None,
     diarization_model: str | None,
-    summarization_model: str | None,
     transcribe_seconds: float | None,
     diarize_seconds: float | None,
-    summarize_seconds: float | None,
-    total_seconds: float | None,
-    prompt_tokens: int,
-    completion_tokens: int,
-    total_tokens: int,
 ) -> Conversion:
+    """Persist a transcript ahead of summarization, so it survives an LLM failure."""
     conversion = session.get(Conversion, hash)
     if conversion is None:
         conversion = Conversion(hash=hash)
@@ -51,12 +45,38 @@ def upsert(
     conversion.title = title
     conversion.filename_base = filename_base
     conversion.transcript_text = transcript_text
-    conversion.summary_text = summary_text
     conversion.whisper_model = whisper_model
     conversion.diarization_model = diarization_model
-    conversion.summarization_model = summarization_model
     conversion.transcribe_seconds = transcribe_seconds
     conversion.diarize_seconds = diarize_seconds
+
+    session.flush()
+    return conversion
+
+
+def save_summary(
+    session: Session,
+    *,
+    hash: str,
+    title: str,
+    filename_base: str,
+    summary_text: str,
+    summarization_model: str | None,
+    summarize_seconds: float | None,
+    total_seconds: float | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+) -> Conversion:
+    """Attach a summary to a conversion whose transcript was already saved."""
+    conversion = session.get(Conversion, hash)
+    if conversion is None:
+        raise ValueError(f"No conversion found for hash {hash!r}; save the transcript first")
+
+    conversion.title = title
+    conversion.filename_base = filename_base
+    conversion.summary_text = summary_text
+    conversion.summarization_model = summarization_model
     conversion.summarize_seconds = summarize_seconds
     conversion.total_seconds = total_seconds
     conversion.prompt_tokens = prompt_tokens

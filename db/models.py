@@ -17,7 +17,7 @@ class Conversion(Base):
     filename_base: Mapped[str] = mapped_column(String(512), nullable=False)
 
     transcript_text: Mapped[str] = mapped_column(Text, nullable=False)
-    summary_text: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_text: Mapped[str | None] = mapped_column(Text)
 
     whisper_model: Mapped[str | None] = mapped_column(String(255))
     diarization_model: Mapped[str | None] = mapped_column(String(255))

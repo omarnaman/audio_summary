@@ -52,15 +52,45 @@ def process_upload(
 ) -> PipelineResult:
     file_hash = hashing.calculate_sha256(upload_path)
     existing = repository.get_by_hash(session, file_hash)
-    if existing and not force_rerun:
+    if existing and existing.summary_text and not force_rerun:
         return _from_model(existing, reused=True)
 
     total_start = time.time()
 
-    asr = asr_client.transcribe_and_diarize(upload_path, cfg)
+    if existing and existing.transcript_text and not force_rerun:
+        # A prior run already transcribed this file but never got a summary
+        # (LLM failure, or it's being retried with a different model) - reuse
+        # the saved transcript instead of re-running ASR.
+        transcript = existing.transcript_text
+        whisper_model = existing.whisper_model
+        diarization_model = existing.diarization_model
+        transcribe_seconds = existing.transcribe_seconds
+        diarize_seconds = existing.diarize_seconds
+    else:
+        asr = asr_client.transcribe_and_diarize(upload_path, cfg)
+        transcript = asr.transcript
+        whisper_model = asr.whisper_model
+        diarization_model = asr.diarization_model
+        transcribe_seconds = asr.transcribe_seconds
+        diarize_seconds = asr.diarize_seconds
+
+        repository.save_transcript(
+            session,
+            hash=file_hash,
+            original_filename=original_filename,
+            title=user_title or original_filename,
+            filename_base=hashing.slugify(user_title or original_filename),
+            transcript_text=transcript,
+            whisper_model=whisper_model,
+            diarization_model=diarization_model,
+            transcribe_seconds=transcribe_seconds,
+            diarize_seconds=diarize_seconds,
+        )
+        # Commit now so the transcript survives even if summarization fails below.
+        session.commit()
 
     summarize_start = time.time()
-    summary = summarize.summarize(asr.transcript, cfg)
+    summary = summarize.summarize(transcript, cfg)
     summarize_seconds = time.time() - summarize_start
 
     total_seconds = time.time() - total_start
@@ -73,19 +103,13 @@ def process_upload(
 
     filename_base = hashing.slugify(title)
 
-    conversion = repository.upsert(
+    conversion = repository.save_summary(
         session,
         hash=file_hash,
-        original_filename=original_filename,
         title=title,
         filename_base=filename_base,
-        transcript_text=asr.transcript,
         summary_text=summary.markdown,
-        whisper_model=asr.whisper_model,
-        diarization_model=asr.diarization_model,
         summarization_model=cfg.ai_model,
-        transcribe_seconds=asr.transcribe_seconds,
-        diarize_seconds=asr.diarize_seconds,
         summarize_seconds=round(summarize_seconds, 2),
         total_seconds=round(total_seconds, 2),
         prompt_tokens=summary.prompt_tokens,
