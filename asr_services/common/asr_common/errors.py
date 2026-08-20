@@ -11,4 +11,5 @@ class TranscriptionError(AsrError):
 
 
 class DiarizationError(AsrError):
-    """Raised when pyannote fails to diarize the audio."""
+    """Raised when the diarization backend (pyannote.audio or, on macOS, mlx-audio Sortformer)
+    fails to diarize the audio."""

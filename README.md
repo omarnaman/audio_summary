@@ -8,8 +8,9 @@ A fully self-hostable audio/video summarizer. Upload any audio or video file and
 2. Transcribe and diarize it (speaker labels) via a pluggable **ASR microservice** — two
    reference implementations live under `asr_services/`, split by platform:
    `asr_services/linux/` (`whisperx` + `pyannote.audio`, containerized, runs anywhere Docker
-   runs) and `asr_services/macos/` (`mlx-whisper` + `pyannote.audio`, native macOS/Apple
-   Silicon process for much faster Metal-accelerated inference). Both share their ffmpeg
+   runs) and `asr_services/macos/` (`mlx-whisper` + `mlx-audio` Sortformer — falling back to
+   `pyannote.audio` if unavailable — native macOS/Apple Silicon process for much faster
+   Metal-accelerated inference). Both share their ffmpeg
    conversion, diarization, and error/data types via `asr_services/common/` (the `asr_common`
    package). You can also point it at your own service implementing the same HTTP contract.
 3. Summarize the resulting transcript via any **OpenAI-compatible chat completions endpoint**

@@ -7,8 +7,10 @@ import time
 from flask import Flask, jsonify, request
 from werkzeug.utils import secure_filename
 
+import diarize
 import transcribe
-from asr_common import convert, diarize
+from asr_common import convert
+from asr_common.diarize import merge_segments
 from asr_common.errors import AsrError
 from config import load_config
 
@@ -53,10 +55,10 @@ def transcribe_route():
         transcribe_seconds = time.time() - transcribe_start
 
         diarize_start = time.time()
-        turns = diarize.diarize(wav_path, cfg.diarization_model, cfg.hf_token)
+        turns = diarize.diarize(wav_path, cfg.sortformer_model, cfg.diarization_model, cfg.hf_token)
         diarize_seconds = time.time() - diarize_start
 
-        transcript_text = diarize.merge_segments(transcript_result.segments, turns)
+        transcript_text = merge_segments(transcript_result.segments, turns)
 
         return jsonify({
             "transcript": transcript_text,
