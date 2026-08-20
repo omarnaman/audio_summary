@@ -1,293 +1,108 @@
 #!/usr/bin/env python3
-import os
-import sys
-import hashlib
-import json
-import time
-import re
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_from_directory
-from dotenv import load_dotenv
-from google import genai
+import tempfile
+from pathlib import Path
 
-# Load environment variables
-load_dotenv()
+from flask import Flask, jsonify, render_template, request
+from werkzeug.utils import secure_filename
 
-
+from config import load_config
+from db import repository
+from db.session import init_engine, session_scope
+from db.models import Conversion
+from pipeline.errors import PipelineError
+from pipeline.run import process_upload
 
 app = Flask(__name__)
-DB_FILE = "conversions.json"
-CONVERSIONS_DIR = "conversions"
-
-# Ensure conversions directory exists
-os.makedirs(CONVERSIONS_DIR, exist_ok=True)
-
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_db(db):
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(db, f, indent=2)
-    except Exception as e:
-        print(f"Error saving database: {e}")
+cfg = load_config()
+init_engine(cfg.database_url)
 
 
+def _conversion_to_list_item(conversion: Conversion) -> dict:
+    return {
+        "hash": conversion.hash,
+        "title": conversion.title,
+        "filename_base": conversion.filename_base,
+        "original_filename": conversion.original_filename,
+        "date": conversion.created_at.date().isoformat(),
+        "stats": {
+            "transcribe_seconds": conversion.transcribe_seconds,
+            "diarize_seconds": conversion.diarize_seconds,
+            "summarize_seconds": conversion.summarize_seconds,
+            "total_seconds": conversion.total_seconds,
+            "prompt_tokens": conversion.prompt_tokens,
+            "completion_tokens": conversion.completion_tokens,
+            "total_tokens": conversion.total_tokens,
+        },
+    }
 
-def calculate_sha256(filepath):
-    sha256 = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    return sha256.hexdigest()
-
-def clean_filename(title_text):
-    import re
-    title = re.sub(r'^[#*\s]+', '', title_text).strip()
-    title = re.sub(r'[^\w\s-]', '', title)
-    title = re.sub(r'[\s-]+', '_', title).lower()
-    return title if title else "audio_summary"
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
+
 @app.route("/api/conversions", methods=["GET"])
 def get_conversions():
-    db = load_db()
-    # Return list of conversions sorted by timestamp desc
-    conversions_list = list(db.values())
-    conversions_list.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-    return jsonify(conversions_list)
+    with session_scope() as session:
+        conversions = repository.list_all(session)
+        return jsonify([_conversion_to_list_item(c) for c in conversions])
 
-@app.route("/api/conversions/<file_hash>", methods=["DELETE"])
-def delete_conversion(file_hash):
-    db = load_db()
-    conversion = db.get(file_hash)
-    if not conversion:
-        return jsonify({"error": "Conversion not found"}), 404
-    
-    # Delete markdown file
-    md_path = os.path.join(CONVERSIONS_DIR, conversion["date"], f"{conversion['filename_base']}.md")
-    if os.path.exists(md_path):
-        os.remove(md_path)
-    
-    # Optionally, delete Gemini file (not implemented here to avoid accidental data loss)
-    
-    # Remove from database
-    del db[file_hash]
-    save_db(db)
-    
-    return jsonify({"message": "Conversion deleted successfully"})
-    
 
 @app.route("/api/conversions/<file_hash>", methods=["GET"])
 def get_conversion_content(file_hash):
-    db = load_db()
-    conversion = db.get(file_hash)
-    if not conversion:
-        return jsonify({"error": "Conversion not found"}), 404
+    with session_scope() as session:
+        conversion = repository.get_by_hash(session, file_hash)
+        if not conversion:
+            return jsonify({"error": "Conversion not found"}), 404
+        return jsonify({"content": conversion.summary_text, "transcript": conversion.transcript_text})
 
-    md_path = os.path.join(CONVERSIONS_DIR, conversion["date"], f"{conversion['filename_base']}.md")
-    if not os.path.exists(md_path):
-        return jsonify({"error": "Summary file not found"}), 404
-    
-    try:
-        with open(md_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return jsonify({"content": content})
-    except Exception as e:
-        return jsonify({"error": f"Failed to read summary file: {str(e)}"}), 500
+
+@app.route("/api/conversions/<file_hash>", methods=["DELETE"])
+def delete_conversion(file_hash):
+    with session_scope() as session:
+        deleted = repository.delete_by_hash(session, file_hash)
+        if not deleted:
+            return jsonify({"error": "Conversion not found"}), 404
+        return jsonify({"message": "Conversion deleted successfully"})
+
 
 @app.route("/api/convert", methods=["POST"])
 def convert_audio():
     if "audio" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
-        
+
     audio_file = request.files["audio"]
     if audio_file.filename == "":
         return jsonify({"error": "Empty filename"}), 400
 
-    # Ensure API Key is available
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        return jsonify({"error": "Gemini API Key is missing. Please set GEMINI_API_KEY in your .env file."}), 500
+    original_filename = audio_file.filename
+    force_rerun = request.form.get("force_rerun", "false").lower() == "true"
+    user_title = request.form.get("title", "").strip() or None
 
-    # Save uploaded file temporarily to compute hash and pass to Gemini API
-    os.makedirs("tmp", exist_ok=True)
-    temp_path = os.path.join("tmp", audio_file.filename)
-    audio_file.save(temp_path)
+    upload_dir = tempfile.mkdtemp(prefix="audio-summary-upload-")
+    upload_path = str(Path(upload_dir, secure_filename(original_filename)))
+    audio_file.save(upload_path)
 
     try:
-        force_rerun = request.form.get("force_rerun", "false").lower() == "true"
-        
-        # Compute SHA-256 hash
-        file_hash = calculate_sha256(temp_path)
-        
-        # Check history database
-        db = load_db()
-        existing = db.get(file_hash)
-
-        if not force_rerun and existing:
-            # Verify the file still exists on disk
-            existing_path = os.path.join(CONVERSIONS_DIR, existing["date"], f"{existing['filename_base']}.md")
-            if os.path.exists(existing_path):
-                print(f"File found in history (hash matches). Reusing existing summary.")
-                with open(existing_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                os.remove(temp_path)
-                
-                if 'reused' not in existing or not existing['reused']:
-                    existing['reused'] = True
-                    db[file_hash] = existing
-                    save_db(db)
-
-                return jsonify({
-                    "title": existing["title"],
-                    "date": existing["date"],
-                    "filename_base": existing["filename_base"],
-                    "content": content,
-                    "stats": existing.get("stats", {}),
-                    "reused": True
-                })
-
-        # Not in history or force_rerun=True: Process with Gemini
-        print(f"Processing with Gemini... (force_rerun={force_rerun})")
-        client = genai.Client(api_key=api_key)
-        
-        gemini_file = None
-        # Try to reuse existing Gemini file if available
-        if existing and 'gemini_file_name' in existing:
-            try:
-                print(f"Attempting to reuse existing Gemini file: {existing['gemini_file_name']}")
-                gemini_file = client.files.get(name=existing['gemini_file_name'])
-                print("Successfully retrieved existing Gemini file.")
-            except Exception as e:
-                print(f"Failed to retrieve existing Gemini file ({e}). Re-uploading is necessary.")
-
-        # If not retrieved, upload it
-        if not gemini_file:
-            print("Uploading new file to Gemini Files API.")
-            gemini_file = client.files.upload(file=temp_path)
-            print(f"Uploaded to Gemini Files API. URI: {gemini_file.uri}, Name: {gemini_file.name}")
-
-        prompt = (
-            "Please listen to the attached audio file. Write a comprehensive, well-structured summary of the audio in Markdown format, including timestamps for key events or topics discussed.\n"
-            "Ensure the very first line of your response is a top-level markdown heading containing a suitable title for this summary, for example:\n"
-            "# Detailed Summary of the Discussion\n"
-            "Do not put any other text before the title."
-        )
-
-        model_name = request.form.get("model", "gemini-3.5-flash")
-        
-        start_time = time.time()
-        response = client.models.generate_content(
-            model=model_name,
-            contents=[gemini_file, prompt]
-        )
-        generation_time = time.time() - start_time
-
-        # NOTE: We are NOT deleting the Gemini file, to allow for re-use.
-        # Consider a cleanup policy for old files if storage is a concern.
-
-        summary_text = response.text
-        if not summary_text:
-            return jsonify({"error": "Gemini returned empty response"}), 500
-
-        # Extract token usage
-        prompt_tokens = 0
-        output_tokens = 0
-        total_tokens = 0
-        if response.usage_metadata:
-            prompt_tokens = response.usage_metadata.prompt_token_count or 0
-            output_tokens = response.usage_metadata.candidates_token_count or 0
-            total_tokens = response.usage_metadata.total_token_count or 0
-
-        # Append statistics to markdown summary
-        stats_markdown = (
-            f"\n\n---\n"
-            f"### Generation Statistics\n"
-            f"- **Conversion Time**: {generation_time:.2f} seconds\n"
-            f"- **Prompt Tokens**: {prompt_tokens:,}\n"
-            f"- **Output Tokens**: {output_tokens:,}\n"
-            f"- **Total Tokens**: {total_tokens:,}\n"
-        )
-        summary_text += stats_markdown
-
-        # Parse title
-        user_title = request.form.get("title", "").strip()
-
-        if user_title:
-            clean_title_text = user_title
-        else:
-            lines = summary_text.strip().split('\n')
-            title_line = "Detailed Summary"
-            for line in lines:
-                if line.strip():
-                    title_line = line.strip()
-                    break
-            clean_title_text = re.sub(r'^[#*\s]+', '', title_line).strip()
-
-        # Remove markdown heading symbols from title
-        filename_base = clean_filename(clean_title_text)
-
-        day_str = datetime.now().strftime("%Y-%m-%d")
-        day_dir = os.path.join(CONVERSIONS_DIR, day_str)
-        os.makedirs(day_dir, exist_ok=True)
-
-        output_filename = f"{filename_base}.md"
-        output_path = os.path.join(day_dir, output_filename)
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(f"# {clean_title_text}\n\n")
-            f.write(summary_text)
-
-        # Update database
-        stats = {
-            "conversion_time": round(generation_time, 2),
-            "prompt_tokens": prompt_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": total_tokens
-        }
-
-        db[file_hash] = {
-            "hash": file_hash,
-            "original_filename": audio_file.filename,
-            "filename_base": filename_base,
-            "title": clean_title_text,
-            "date": day_str,
-            "timestamp": datetime.now().isoformat(),
-            "stats": stats,
-            "reused": False,
-            "gemini_file_name": gemini_file.name
-        }
-        save_db(db)
-
-        # Cleanup temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        with session_scope() as session:
+            result = process_upload(upload_path, original_filename, user_title, force_rerun, cfg, session)
 
         return jsonify({
-            "reused": False,
-            "title": clean_title_text,
-            "date": day_str,
-            "filename_base": filename_base,
-            "content": summary_text,
-            "stats": stats
+            "hash": result.hash,
+            "title": result.title,
+            "filename_base": result.filename_base,
+            "date": result.date,
+            "content": result.content,
+            "transcript": result.transcript,
+            "stats": result.stats,
+            "reused": result.reused,
         })
-
-    except Exception as e:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        print(f"Error during conversion: {e}")
+    except PipelineError as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        Path(upload_path).unlink(missing_ok=True)
+        Path(upload_dir).rmdir()
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-
