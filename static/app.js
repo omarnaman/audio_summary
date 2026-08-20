@@ -28,6 +28,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const tabTranscriptBtn = document.getElementById("tab-transcript-btn");
     const reusedBadge = document.getElementById("reused-badge");
     
+    const statTranscribeTime = document.getElementById("stat-transcribe-time");
+    const statDiarizeTime = document.getElementById("stat-diarize-time");
+    const statSummarizeTime = document.getElementById("stat-summarize-time");
     const statTime = document.getElementById("stat-time");
     const statPromptTokens = document.getElementById("stat-prompt-tokens");
     const statOutputTokens = document.getElementById("stat-output-tokens");
@@ -158,12 +161,19 @@ document.addEventListener("DOMContentLoaded", () => {
         showTab("summary");
 
         // Render stats
+        const formatSeconds = (value) => (value != null ? `${value}s` : "-");
         if (item.stats) {
-            statTime.textContent = item.stats.total_seconds != null ? `${item.stats.total_seconds}s` : "-";
+            statTranscribeTime.textContent = formatSeconds(item.stats.transcribe_seconds);
+            statDiarizeTime.textContent = formatSeconds(item.stats.diarize_seconds);
+            statSummarizeTime.textContent = formatSeconds(item.stats.summarize_seconds);
+            statTime.textContent = formatSeconds(item.stats.total_seconds);
             statPromptTokens.textContent = (item.stats.prompt_tokens ?? 0).toLocaleString();
             statOutputTokens.textContent = (item.stats.completion_tokens ?? 0).toLocaleString();
             statTotalTokens.textContent = (item.stats.total_tokens ?? 0).toLocaleString();
         } else {
+            statTranscribeTime.textContent = "-";
+            statDiarizeTime.textContent = "-";
+            statSummarizeTime.textContent = "-";
             statTime.textContent = "-";
             statPromptTokens.textContent = "-";
             statOutputTokens.textContent = "-";
