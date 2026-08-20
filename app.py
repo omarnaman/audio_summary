@@ -10,7 +10,7 @@ from db import repository
 from db.session import init_engine, session_scope
 from db.models import Conversion
 from pipeline.errors import PipelineError
-from pipeline.run import process_upload
+from pipeline.run import process_upload, reinvoke_summary
 
 app = Flask(__name__)
 cfg = load_config()
@@ -24,6 +24,7 @@ def _conversion_to_list_item(conversion: Conversion) -> dict:
         "filename_base": conversion.filename_base,
         "original_filename": conversion.original_filename,
         "date": conversion.created_at.date().isoformat(),
+        "has_summary": conversion.summary_text is not None,
         "stats": {
             "transcribe_seconds": conversion.transcribe_seconds,
             "diarize_seconds": conversion.diarize_seconds,
@@ -54,7 +55,11 @@ def get_conversion_content(file_hash):
         conversion = repository.get_by_hash(session, file_hash)
         if not conversion:
             return jsonify({"error": "Conversion not found"}), 404
-        return jsonify({"content": conversion.summary_text, "transcript": conversion.transcript_text})
+        return jsonify({
+            "content": conversion.summary_text,
+            "transcript": conversion.transcript_text,
+            "has_summary": conversion.summary_text is not None,
+        })
 
 
 @app.route("/api/conversions/<file_hash>", methods=["DELETE"])
@@ -102,6 +107,28 @@ def convert_audio():
     finally:
         Path(upload_path).unlink(missing_ok=True)
         Path(upload_dir).rmdir()
+
+
+@app.route("/api/conversions/<file_hash>/summarize", methods=["POST"])
+def resummarize_conversion(file_hash):
+    user_title = request.form.get("title", "").strip() or None
+
+    try:
+        with session_scope() as session:
+            result = reinvoke_summary(file_hash, user_title, cfg, session)
+
+        return jsonify({
+            "hash": result.hash,
+            "title": result.title,
+            "filename_base": result.filename_base,
+            "date": result.date,
+            "content": result.content,
+            "transcript": result.transcript,
+            "stats": result.stats,
+            "reused": result.reused,
+        })
+    except PipelineError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@
     
     --success: #10B981;
     --error: #EF4444;
+    --warning: #F59E0B;
     --accent: #EC4899;
     
     --font-heading: 'Outfit', sans-serif;
@@ -557,6 +558,11 @@ body {
 .cache-badge {
     background: rgba(16, 185, 129, 0.15);
     color: var(--success);
+}
+
+.pending-badge {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
 }
 
 .reader-header h2 {

@@ -4,22 +4,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const readerPanel = document.getElementById("reader-panel");
     const processingCard = document.getElementById("processing-card");
     const uploadCard = document.querySelector(".upload-card");
-    
+
     const dragZone = document.getElementById("drag-zone");
     const audioInput = document.getElementById("audio-input");
     const fileSelectedContent = document.getElementById("file-selected-content");
     const dragZoneContent = document.querySelector(".drag-zone-content");
     const selectedFileName = document.getElementById("selected-file-name");
     const removeFileBtn = document.getElementById("remove-file-btn");
-    
+
     const uploadForm = document.getElementById("upload-form");
     const submitBtn = document.getElementById("submit-btn");
     const processingStatus = document.getElementById("processing-status");
-    
+
     const historyList = document.getElementById("history-list");
     const searchInput = document.getElementById("search-input");
     const newSummaryBtn = document.getElementById("new-btn");
-    
+
     const summaryTitle = document.getElementById("summary-title");
     const summaryDate = document.getElementById("summary-date");
     const summaryBody = document.getElementById("summary-body");
@@ -27,7 +27,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const tabSummaryBtn = document.getElementById("tab-summary-btn");
     const tabTranscriptBtn = document.getElementById("tab-transcript-btn");
     const reusedBadge = document.getElementById("reused-badge");
-    
+    const pendingBadge = document.getElementById("pending-badge");
+    const regenerateBtn = document.getElementById("regenerate-btn");
+
     const statTranscribeTime = document.getElementById("stat-transcribe-time");
     const statDiarizeTime = document.getElementById("stat-diarize-time");
     const statSummarizeTime = document.getElementById("stat-summarize-time");
@@ -35,7 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const statPromptTokens = document.getElementById("stat-prompt-tokens");
     const statOutputTokens = document.getElementById("stat-output-tokens");
     const statTotalTokens = document.getElementById("stat-total-tokens");
-    
+
     const copyBtn = document.getElementById("copy-btn");
     const downloadMdBtn = document.getElementById("download-md-btn");
     const deleteBtn = document.getElementById("delete-btn");
@@ -75,10 +77,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         historyList.innerHTML = items.map(item => `
             <div class="history-item" data-hash="${item.hash}">
-                <h4>${item.title}</h4>
+                <h4>${item.has_summary ? "" : "⏳ "}${item.title}</h4>
                 <div class="history-meta">
                     <span class="history-date">${item.date}</span>
-                    <span>${item.stats ? (item.stats.total_tokens / 1000).toFixed(1) + 'k' : '0'} tokens</span>
+                    <span>${item.has_summary ? (item.stats.total_tokens / 1000).toFixed(1) + 'k tokens' : 'Summary pending'}</span>
                 </div>
             </div>
         `).join("");
@@ -96,8 +98,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Filter history on search
     searchInput.addEventListener("input", (e) => {
         const query = e.target.value.toLowerCase().strip();
-        const filtered = historyData.filter(item => 
-            item.title.toLowerCase().includes(query) || 
+        const filtered = historyData.filter(item =>
+            item.title.toLowerCase().includes(query) ||
             item.original_filename.toLowerCase().includes(query)
         );
         renderHistory(filtered);
@@ -136,7 +138,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Render summary UI
     function displaySummary(item, content, transcript) {
-        currentSummary = { ...item, content, transcript };
+        const hasSummary = item.has_summary !== undefined ? item.has_summary : content != null;
+        currentSummary = { ...item, content, transcript, has_summary: hasSummary };
 
         summaryTitle.textContent = item.title;
         summaryDate.textContent = item.date;
@@ -146,19 +149,24 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
             reusedBadge.classList.add("hidden");
         }
+        pendingBadge.classList.toggle("hidden", hasSummary);
+        regenerateBtn.textContent = hasSummary ? "🔁 Regenerate Summary" : "🔁 Generate Summary";
 
-        // Render markdown to HTML using Marked
-        // First strip off any leading headers to avoid repeating the title
-        let cleanContent = content;
-        const lines = content.split('\n');
-        if (lines[0] && lines[0].startsWith('#')) {
-            cleanContent = lines.slice(1).join('\n');
+        if (hasSummary) {
+            // Render markdown to HTML using Marked
+            // First strip off any leading headers to avoid repeating the title
+            let cleanContent = content;
+            const lines = content.split('\n');
+            if (lines[0] && lines[0].startsWith('#')) {
+                cleanContent = lines.slice(1).join('\n');
+            }
+            summaryBody.innerHTML = marked.parse(cleanContent);
+            showTab("summary");
+        } else {
+            summaryBody.innerHTML = `<p class="empty-state">No summary yet. The transcript was saved, but the LLM call hasn't produced a summary. Use "Generate Summary" to run it.</p>`;
+            showTab("transcript");
         }
-
-        // Render markdown body
-        summaryBody.innerHTML = marked.parse(cleanContent);
         transcriptBody.textContent = transcript || "No transcript available.";
-        showTab("summary");
 
         // Render stats
         const formatSeconds = (value) => (value != null ? `${value}s` : "-");
@@ -248,9 +256,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Handle form submission
     uploadForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        
+
         if (audioInput.files.length === 0) return;
-        
+
         const file = audioInput.files[0];
         const formData = new FormData();
         formData.append("audio", file);
@@ -288,10 +296,10 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const result = await response.json();
-            
+
             // Reload history to include new conversion
             await loadHistory();
-            
+
             // Render the summary details
             displaySummary(result, result.content, result.transcript);
             showToast(result.reused ? "Loaded existing summary from cache!" : "Summary generated successfully!");
@@ -303,9 +311,42 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    // Regenerate / generate the summary from the saved transcript
+    regenerateBtn.addEventListener("click", async () => {
+        if (!currentSummary) return;
+
+        regenerateBtn.disabled = true;
+        regenerateBtn.textContent = "⏳ Generating...";
+
+        try {
+            const response = await fetch(`/api/conversions/${currentSummary.hash}/summarize`, {
+                method: "POST",
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || "Failed to generate summary");
+            }
+
+            const result = await response.json();
+            await loadHistory();
+            displaySummary(result, result.content, result.transcript);
+            showToast("Summary generated successfully!");
+        } catch (error) {
+            console.error(error);
+            showToast(`Error: ${error.message}`);
+            regenerateBtn.textContent = currentSummary.has_summary ? "🔁 Regenerate Summary" : "🔁 Generate Summary";
+        } finally {
+            regenerateBtn.disabled = false;
+        }
+    });
+
     // Copy Markdown to Clipboard
     copyBtn.addEventListener("click", () => {
-        if (!currentSummary) return;
+        if (!currentSummary || !currentSummary.has_summary) {
+            showToast("No summary yet to copy");
+            return;
+        }
         navigator.clipboard.writeText(currentSummary.content).then(() => {
             showToast("Copied markdown summary to clipboard!");
         }).catch(err => {
@@ -316,7 +357,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Download Markdown File
     downloadMdBtn.addEventListener("click", () => {
-        if (!currentSummary) return;
+        if (!currentSummary || !currentSummary.has_summary) {
+            showToast("No summary yet to download");
+            return;
+        }
         const blob = new Blob([currentSummary.content], { type: "text/markdown;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");

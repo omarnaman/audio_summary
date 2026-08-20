@@ -7,6 +7,7 @@ from config import Config
 from db import repository
 from db.models import Conversion
 from pipeline import asr_client, hashing, summarize
+from pipeline.errors import PipelineError
 
 
 @dataclass
@@ -89,6 +90,37 @@ def process_upload(
         # Commit now so the transcript survives even if summarization fails below.
         session.commit()
 
+    return _summarize_and_save(session, cfg, file_hash, transcript, user_title, total_start)
+
+
+def reinvoke_summary(
+    file_hash: str,
+    user_title: str | None,
+    cfg: Config,
+    session: Session,
+) -> PipelineResult:
+    """Re-run summarization for a conversion whose transcript is already saved.
+
+    Used to recover from a failed LLM call, or to regenerate a summary after
+    switching AI_MODEL, without re-uploading the audio or re-running ASR.
+    """
+    existing = repository.get_by_hash(session, file_hash)
+    if existing is None:
+        raise PipelineError(f"No conversion found for hash {file_hash!r}")
+    if not existing.transcript_text:
+        raise PipelineError("No transcript saved for this conversion yet")
+
+    return _summarize_and_save(session, cfg, file_hash, existing.transcript_text, user_title, time.time())
+
+
+def _summarize_and_save(
+    session: Session,
+    cfg: Config,
+    file_hash: str,
+    transcript: str,
+    user_title: str | None,
+    total_start: float,
+) -> PipelineResult:
     summarize_start = time.time()
     summary = summarize.summarize(transcript, cfg)
     summarize_seconds = time.time() - summarize_start
