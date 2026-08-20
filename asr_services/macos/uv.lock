@@ -164,7 +164,7 @@ wheels = [
 [[package]]
 name = "asr-common"
 version = "0.1.0"
-source = { directory = "../common" }
+source = { editable = "../common" }
 dependencies = [
     { name = "pyannote-audio" },
 ]
@@ -185,7 +185,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asr-common", directory = "../common" },
+    { name = "asr-common", editable = "../common" },
     { name = "flask", specifier = ">=3.1.3" },
     { name = "mlx-whisper", specifier = ">=0.4" },
     { name = "python-dotenv", specifier = ">=1.2.2" },

@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-asr-common = { path = "../common" }
+asr-common = { path = "../common", editable = true }
