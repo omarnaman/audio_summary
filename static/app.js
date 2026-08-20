@@ -46,6 +46,22 @@ document.addEventListener("DOMContentLoaded", () => {
     let historyData = [];
     let currentSummary = null;
 
+    // Poll a background job until it finishes, reporting progress messages as they arrive
+    async function pollJob(jobId, onProgress) {
+        while (true) {
+            const response = await fetch(`/api/jobs/${jobId}`);
+            if (!response.ok) throw new Error("Failed to check job status");
+            const job = await response.json();
+
+            if (onProgress && job.message) onProgress(job.stage, job.message);
+
+            if (job.status === "done") return job.result;
+            if (job.status === "error") throw new Error(job.error || "Processing failed");
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+
     // Toast helper
     function showToast(message) {
         toast.textContent = message;
@@ -276,13 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Update UI state to processing
         uploadCard.classList.add("hidden");
         processingCard.classList.remove("hidden");
-        processingStatus.textContent = "Converting and transcribing audio...";
-
-        // Simulate status update
-        setTimeout(() => {
-            if (!uploadCard.classList.contains("hidden")) return;
-            processingStatus.textContent = "Diarizing speakers and summarizing...";
-        }, 4000);
+        processingStatus.textContent = "Uploading audio file...";
 
         try {
             const response = await fetch("/api/convert", {
@@ -295,7 +305,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error(data.error || "Conversion failed");
             }
 
-            const result = await response.json();
+            const { job_id } = await response.json();
+            const result = await pollJob(job_id, (stage, message) => {
+                processingStatus.textContent = message;
+            });
 
             // Reload history to include new conversion
             await loadHistory();
@@ -328,7 +341,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error(data.error || "Failed to generate summary");
             }
 
-            const result = await response.json();
+            const { job_id } = await response.json();
+            const result = await pollJob(job_id, (stage, message) => {
+                regenerateBtn.textContent = `⏳ ${message}`;
+            });
+
             await loadHistory();
             displaySummary(result, result.content, result.transcript);
             showToast("Summary generated successfully!");

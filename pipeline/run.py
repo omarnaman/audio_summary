@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 from sqlalchemy.orm import Session
 
@@ -50,6 +51,7 @@ def process_upload(
     force_rerun: bool,
     cfg: Config,
     session: Session,
+    on_progress: Callable[[str, str], None] | None = None,
 ) -> PipelineResult:
     file_hash = hashing.calculate_sha256(upload_path)
     existing = repository.get_by_hash(session, file_hash)
@@ -68,6 +70,8 @@ def process_upload(
         transcribe_seconds = existing.transcribe_seconds
         diarize_seconds = existing.diarize_seconds
     else:
+        if on_progress:
+            on_progress("diarizing", "Transcribing and diarizing audio...")
         asr = asr_client.transcribe_and_diarize(upload_path, cfg)
         transcript = asr.transcript
         whisper_model = asr.whisper_model
@@ -90,7 +94,7 @@ def process_upload(
         # Commit now so the transcript survives even if summarization fails below.
         session.commit()
 
-    return _summarize_and_save(session, cfg, file_hash, transcript, user_title, total_start)
+    return _summarize_and_save(session, cfg, file_hash, transcript, user_title, total_start, on_progress)
 
 
 def reinvoke_summary(
@@ -98,6 +102,7 @@ def reinvoke_summary(
     user_title: str | None,
     cfg: Config,
     session: Session,
+    on_progress: Callable[[str, str], None] | None = None,
 ) -> PipelineResult:
     """Re-run summarization for a conversion whose transcript is already saved.
 
@@ -110,7 +115,7 @@ def reinvoke_summary(
     if not existing.transcript_text:
         raise PipelineError("No transcript saved for this conversion yet")
 
-    return _summarize_and_save(session, cfg, file_hash, existing.transcript_text, user_title, time.time())
+    return _summarize_and_save(session, cfg, file_hash, existing.transcript_text, user_title, time.time(), on_progress)
 
 
 def _summarize_and_save(
@@ -120,9 +125,10 @@ def _summarize_and_save(
     transcript: str,
     user_title: str | None,
     total_start: float,
+    on_progress: Callable[[str, str], None] | None = None,
 ) -> PipelineResult:
     summarize_start = time.time()
-    summary = summarize.summarize(transcript, cfg)
+    summary = summarize.summarize(transcript, cfg, on_progress=on_progress)
     summarize_seconds = time.time() - summarize_start
 
     total_seconds = time.time() - total_start

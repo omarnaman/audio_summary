@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import tempfile
+import threading
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
@@ -10,6 +11,7 @@ from db import repository
 from db.session import init_engine, session_scope
 from db.models import Conversion
 from pipeline.errors import PipelineError
+from pipeline.jobs import complete_job, create_job, fail_job, get_job, update_job
 from pipeline.run import process_upload, reinvoke_summary
 
 app = Flask(__name__)
@@ -71,6 +73,19 @@ def delete_conversion(file_hash):
         return jsonify({"message": "Conversion deleted successfully"})
 
 
+def _result_to_payload(result) -> dict:
+    return {
+        "hash": result.hash,
+        "title": result.title,
+        "filename_base": result.filename_base,
+        "date": result.date,
+        "content": result.content,
+        "transcript": result.transcript,
+        "stats": result.stats,
+        "reused": result.reused,
+    }
+
+
 @app.route("/api/convert", methods=["POST"])
 def convert_audio():
     if "audio" not in request.files:
@@ -88,48 +103,63 @@ def convert_audio():
     upload_path = str(Path(upload_dir, secure_filename(original_filename)))
     audio_file.save(upload_path)
 
-    try:
-        with session_scope() as session:
-            result = process_upload(upload_path, original_filename, user_title, force_rerun, cfg, session)
+    job_id = create_job()
 
-        return jsonify({
-            "hash": result.hash,
-            "title": result.title,
-            "filename_base": result.filename_base,
-            "date": result.date,
-            "content": result.content,
-            "transcript": result.transcript,
-            "stats": result.stats,
-            "reused": result.reused,
-        })
-    except PipelineError as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        Path(upload_path).unlink(missing_ok=True)
-        Path(upload_dir).rmdir()
+    def run_job():
+        def on_progress(stage, message):
+            update_job(job_id, stage, message)
+
+        try:
+            with session_scope() as session:
+                result = process_upload(
+                    upload_path, original_filename, user_title, force_rerun, cfg, session, on_progress=on_progress
+                )
+            complete_job(job_id, _result_to_payload(result))
+        except PipelineError as e:
+            fail_job(job_id, str(e))
+        finally:
+            Path(upload_path).unlink(missing_ok=True)
+            Path(upload_dir).rmdir()
+
+    threading.Thread(target=run_job, daemon=True).start()
+    return jsonify({"job_id": job_id}), 202
 
 
 @app.route("/api/conversions/<file_hash>/summarize", methods=["POST"])
 def resummarize_conversion(file_hash):
     user_title = request.form.get("title", "").strip() or None
 
-    try:
-        with session_scope() as session:
-            result = reinvoke_summary(file_hash, user_title, cfg, session)
+    job_id = create_job()
 
-        return jsonify({
-            "hash": result.hash,
-            "title": result.title,
-            "filename_base": result.filename_base,
-            "date": result.date,
-            "content": result.content,
-            "transcript": result.transcript,
-            "stats": result.stats,
-            "reused": result.reused,
-        })
-    except PipelineError as e:
-        return jsonify({"error": str(e)}), 400
+    def run_job():
+        def on_progress(stage, message):
+            update_job(job_id, stage, message)
+
+        try:
+            with session_scope() as session:
+                result = reinvoke_summary(file_hash, user_title, cfg, session, on_progress=on_progress)
+            complete_job(job_id, _result_to_payload(result))
+        except PipelineError as e:
+            fail_job(job_id, str(e))
+
+    threading.Thread(target=run_job, daemon=True).start()
+    return jsonify({"job_id": job_id}), 202
+
+
+@app.route("/api/jobs/<job_id>", methods=["GET"])
+def get_job_status(job_id):
+    job = get_job(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+
+    return jsonify({
+        "status": job.status,
+        "stage": job.stage,
+        "message": job.message,
+        "result": job.result,
+        "error": job.error,
+    })
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)

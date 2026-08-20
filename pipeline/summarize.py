@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Callable
 
 from openai import OpenAI
 
@@ -104,11 +105,17 @@ def _chunk_transcript(transcript_text: str, max_chunk_chars: int) -> list[str]:
     return chunks
 
 
-def summarize(transcript_text: str, cfg: Config) -> SummaryResult:
+def summarize(
+    transcript_text: str,
+    cfg: Config,
+    on_progress: Callable[[str, str], None] | None = None,
+) -> SummaryResult:
     client = OpenAI(base_url=cfg.ai_base_url, api_key=cfg.ai_api_key)
 
     chunks = _chunk_transcript(transcript_text, cfg.ai_summary_chunk_chars)
     if len(chunks) <= 1:
+        if on_progress:
+            on_progress("summarizing", "Summarizing transcript...")
         return _complete(client, cfg, PROMPT.format(transcript=transcript_text))
 
     # Map: summarize each chunk independently so no single LLM call has to prefill
@@ -117,6 +124,8 @@ def summarize(transcript_text: str, cfg: Config) -> SummaryResult:
     section_summaries: list[str] = []
     prompt_tokens = completion_tokens = total_tokens = 0
     for index, chunk in enumerate(chunks, start=1):
+        if on_progress:
+            on_progress("summarizing", f"Summarizing section {index} of {len(chunks)}...")
         result = _complete(client, cfg, MAP_PROMPT.format(index=index, total=len(chunks), transcript=chunk))
         section_summaries.append(result.markdown)
         prompt_tokens += result.prompt_tokens
@@ -125,6 +134,8 @@ def summarize(transcript_text: str, cfg: Config) -> SummaryResult:
 
     # Reduce: merge the section summaries (much shorter than the raw transcript)
     # into one final summary in a single call.
+    if on_progress:
+        on_progress("summarizing", "Merging section summaries into the final summary...")
     sections = "\n\n".join(f"### Section {i}\n{s}" for i, s in enumerate(section_summaries, start=1))
     final = _complete(client, cfg, REDUCE_PROMPT.format(sections=sections))
 
