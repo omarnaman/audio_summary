@@ -2,3 +2,8 @@ conversions
 conversions.json
 .md
 .env
+__pycache__/
+.venv/
+asr_services/linux/.venv/
+asr_services/macos/.venv/
+asr_services/common/dist/
