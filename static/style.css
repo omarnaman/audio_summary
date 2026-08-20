@@ -636,6 +636,44 @@ body {
     margin: 32px 0;
 }
 
+/* Summary / Transcript Tabs */
+.view-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.view-tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 16px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: var(--transition);
+}
+
+.view-tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.view-tab-btn.active {
+    color: var(--primary-hover);
+    border-bottom-color: var(--primary-hover);
+}
+
+.transcript-body {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #E5E7EB;
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
 /* Reader Sidebar cards */
 .reader-sidebar-cards {
     display: flex;

@@ -13,7 +13,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const removeFileBtn = document.getElementById("remove-file-btn");
     
     const uploadForm = document.getElementById("upload-form");
-    const modelSelect = document.getElementById("model-select");
     const submitBtn = document.getElementById("submit-btn");
     const processingStatus = document.getElementById("processing-status");
     
@@ -24,6 +23,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const summaryTitle = document.getElementById("summary-title");
     const summaryDate = document.getElementById("summary-date");
     const summaryBody = document.getElementById("summary-body");
+    const transcriptBody = document.getElementById("transcript-body");
+    const tabSummaryBtn = document.getElementById("tab-summary-btn");
+    const tabTranscriptBtn = document.getElementById("tab-transcript-btn");
     const reusedBadge = document.getElementById("reused-badge");
     
     const statTime = document.getElementById("stat-time");
@@ -108,22 +110,34 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const response = await fetch(`/api/conversions/${item.hash}`);
             if (!response.ok) throw new Error("Failed to fetch summary file");
-            
+
             const data = await response.json();
-            displaySummary(item, data.content);
+            displaySummary(item, data.content, data.transcript);
         } catch (error) {
             console.error(error);
             showToast("Failed to load summary content");
         }
     }
 
+    // Switch between the Summary and Transcript tabs
+    function showTab(tab) {
+        const showSummary = tab === "summary";
+        summaryBody.classList.toggle("hidden", !showSummary);
+        transcriptBody.classList.toggle("hidden", showSummary);
+        tabSummaryBtn.classList.toggle("active", showSummary);
+        tabTranscriptBtn.classList.toggle("active", !showSummary);
+    }
+
+    tabSummaryBtn.addEventListener("click", () => showTab("summary"));
+    tabTranscriptBtn.addEventListener("click", () => showTab("transcript"));
+
     // Render summary UI
-    function displaySummary(item, content) {
-        currentSummary = { ...item, content };
-        
+    function displaySummary(item, content, transcript) {
+        currentSummary = { ...item, content, transcript };
+
         summaryTitle.textContent = item.title;
         summaryDate.textContent = item.date;
-        
+
         if (item.reused) {
             reusedBadge.classList.remove("hidden");
         } else {
@@ -137,16 +151,18 @@ document.addEventListener("DOMContentLoaded", () => {
         if (lines[0] && lines[0].startsWith('#')) {
             cleanContent = lines.slice(1).join('\n');
         }
-        
+
         // Render markdown body
         summaryBody.innerHTML = marked.parse(cleanContent);
+        transcriptBody.textContent = transcript || "No transcript available.";
+        showTab("summary");
 
         // Render stats
         if (item.stats) {
-            statTime.textContent = `${item.stats.conversion_time}s`;
-            statPromptTokens.textContent = item.stats.prompt_tokens.toLocaleString();
-            statOutputTokens.textContent = item.stats.output_tokens.toLocaleString();
-            statTotalTokens.textContent = item.stats.total_tokens.toLocaleString();
+            statTime.textContent = item.stats.total_seconds != null ? `${item.stats.total_seconds}s` : "-";
+            statPromptTokens.textContent = (item.stats.prompt_tokens ?? 0).toLocaleString();
+            statOutputTokens.textContent = (item.stats.completion_tokens ?? 0).toLocaleString();
+            statTotalTokens.textContent = (item.stats.total_tokens ?? 0).toLocaleString();
         } else {
             statTime.textContent = "-";
             statPromptTokens.textContent = "-";
@@ -228,7 +244,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const file = audioInput.files[0];
         const formData = new FormData();
         formData.append("audio", file);
-        formData.append("model", modelSelect.value);
 
         const userTitle = document.getElementById("title-input").value.trim();
         if (userTitle) {
@@ -243,12 +258,12 @@ document.addEventListener("DOMContentLoaded", () => {
         // Update UI state to processing
         uploadCard.classList.add("hidden");
         processingCard.classList.remove("hidden");
-        processingStatus.textContent = "Uploading to Gemini API...";
+        processingStatus.textContent = "Converting and transcribing audio...";
 
         // Simulate status update
         setTimeout(() => {
             if (!uploadCard.classList.contains("hidden")) return;
-            processingStatus.textContent = "Processing audio with Gemini...";
+            processingStatus.textContent = "Diarizing speakers and summarizing...";
         }, 4000);
 
         try {
@@ -268,7 +283,7 @@ document.addEventListener("DOMContentLoaded", () => {
             await loadHistory();
             
             // Render the summary details
-            displaySummary(result, result.content);
+            displaySummary(result, result.content, result.transcript);
             showToast(result.reused ? "Loaded existing summary from cache!" : "Summary generated successfully!");
         } catch (error) {
             console.error(error);
