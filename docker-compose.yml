@@ -10,9 +10,6 @@ services:
       - AI_MODEL=${AI_MODEL}
       - ASR_SERVICE_URL=${ASR_SERVICE_URL:-http://asr-service:8000}
       - ASR_SERVICE_API_KEY=${ASR_SERVICE_API_KEY}
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]
       interval: 30s
@@ -43,6 +40,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    profiles: ["test"]
     restart: unless-stopped
     environment:
       - POSTGRES_USER=audio_summary

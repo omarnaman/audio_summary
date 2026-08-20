@@ -14,7 +14,9 @@ A fully self-hostable audio/video summarizer. Upload any audio or video file and
    package). You can also point it at your own service implementing the same HTTP contract.
 3. Summarize the resulting transcript via any **OpenAI-compatible chat completions endpoint**
    (a local server such as llama.cpp, Ollama, vLLM, LM Studio — or a hosted one, if you want).
-4. Persist the transcript, summary, and stats in **PostgreSQL**.
+4. Persist the transcript, summary, and stats in **PostgreSQL** — point `DATABASE_URL` at
+   whatever instance you already run in production (local, RDS, etc). A bundled Postgres
+   container is included for local testing only, behind the `test` compose profile.
 
 Nothing is required to leave your machine/network: no cloud transcription API, no cloud LLM API,
 unless you choose to point the AI endpoint at one yourself.
@@ -59,14 +61,25 @@ unless you choose to point the AI endpoint at one yourself.
 
 ## Running the Application
 
-### Default: bundled whisperx/pyannote ASR service
+### Production
+
+`docker compose up --build app` (optionally with `--profile default-asr` if you also want the
+bundled ASR service) starts only the application — Postgres is **not** started by this compose
+file by default, since a production deployment is expected to already have an instance running
+(local, RDS, etc). Just point `DATABASE_URL` in `.env` at it.
+
+### Local testing: bundled Postgres + whisperx/pyannote ASR service
+
+The `postgres` service lives behind a `test` compose profile — it's a convenience for trying the
+whole stack locally without standing up your own database first:
 
 ```sh
-docker compose --profile default-asr up --build
+docker compose --profile test --profile default-asr up --build
 ```
 
-This starts the app, Postgres, and the reference ASR service (CPU-only transcription — expect it
-to be noticeably slower than a native/GPU/Metal setup, but fully functional and offline).
+This starts the app, a local Postgres container, and the reference ASR service (CPU-only
+transcription — expect it to be noticeably slower than a native/GPU/Metal setup, but fully
+functional and offline).
 
 ### Alternative: mlx-whisper on Apple Silicon (native, not containerized)
 
@@ -82,7 +95,9 @@ uv sync
 uv run service.py
 ```
 
-See `asr_services/macos/README.md` for full details. Then start just the app and Postgres in Docker:
+See `asr_services/macos/README.md` for full details. Then start the app in Docker, adding
+`postgres` by name if you want the bundled local database too (naming it explicitly starts it
+even though it's behind the `test` profile) — otherwise just point `DATABASE_URL` at your own:
 
 ```sh
 docker compose up --build app postgres

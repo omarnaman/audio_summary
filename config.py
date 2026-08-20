@@ -6,6 +6,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _normalize_database_url(url: str) -> str:
+    """Ensure the URL selects the psycopg (v3) driver we depend on.
+
+    Managed Postgres providers (RDS, etc.) hand out plain postgres:// or
+    postgresql:// connection strings, which SQLAlchemy defaults to the
+    psycopg2 dialect for — a driver this project doesn't install.
+    """
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
 @dataclass(frozen=True)
 class Config:
     database_url: str
@@ -30,7 +44,7 @@ def load_config() -> Config:
         )
 
     return Config(
-        database_url=os.environ["DATABASE_URL"],
+        database_url=_normalize_database_url(os.environ["DATABASE_URL"]),
         ai_base_url=os.environ["AI_BASE_URL"],
         ai_api_key=os.environ.get("AI_API_KEY", "not-needed"),
         ai_model=os.environ["AI_MODEL"],
