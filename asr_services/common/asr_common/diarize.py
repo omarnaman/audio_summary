@@ -14,7 +14,7 @@ def diarize(wav_path: str, model: str, hf_token: str | None) -> list[SpeakerTurn
 
     return [
         SpeakerTurn(start=float(turn.start), end=float(turn.end), speaker=str(speaker))
-        for turn, _, speaker in annotation.itertracks(yield_label=True)
+        for turn, _, speaker in annotation.speaker_diarization.itertracks(yield_label=True)
     ]
 
 

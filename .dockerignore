@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.env
+.dockerignore
+Dockerfile
+docker-compose.yml
+README.md
+
+# Not needed by the main app image: heavy, independent ASR service projects
+asr_services/
