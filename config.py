@@ -26,6 +26,7 @@ class Config:
     ai_base_url: str
     ai_api_key: str
     ai_model: str
+    ai_summary_chunk_chars: int
     asr_service_url: str
     asr_service_api_key: str | None
     asr_service_timeout: int
@@ -48,6 +49,7 @@ def load_config() -> Config:
         ai_base_url=os.environ["AI_BASE_URL"],
         ai_api_key=os.environ.get("AI_API_KEY", "not-needed"),
         ai_model=os.environ["AI_MODEL"],
+        ai_summary_chunk_chars=int(os.environ.get("AI_SUMMARY_CHUNK_CHARS", "20000")),
         asr_service_url=os.environ["ASR_SERVICE_URL"].rstrip("/"),
         asr_service_api_key=os.environ.get("ASR_SERVICE_API_KEY") or None,
         asr_service_timeout=int(os.environ.get("ASR_SERVICE_TIMEOUT", "600")),

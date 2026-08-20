@@ -46,6 +46,11 @@ unless you choose to point the AI endpoint at one yourself.
    AI_BASE_URL=http://host.docker.internal:11434/v1
    AI_API_KEY=not-needed
    AI_MODEL=llama3.1
+   # Transcripts longer than this (in characters) are summarized map-reduce style:
+   # summarized in chunks, then the chunk summaries are merged into a final summary.
+   # This bounds the prefill size of any single LLM call, at the cost of extra calls
+   # for long transcripts. Lower this if you're memory-constrained. Default: 20000.
+   AI_SUMMARY_CHUNK_CHARS=20000
 
    # ASR (transcription + diarization) service
    ASR_SERVICE_URL=http://asr-service:8000
